@@ -8,7 +8,7 @@ import * as vscode from "vscode";
  * @param latestSem - the latest semver fetched from npm registry
  * @param isCaret - whether the specified version had a caret (^), which allows minor and patch updates
  * @param isTilde - whether the specified version had a tilde (~), which allows patch updates within same minor
- * @returns whether the specified version is considered outdated compared to latest, and reason for it
+ * @returns whether the specified version is considered outdated compared to latest
  */
 export function compareVersions(
   specifiedSem: {
@@ -25,6 +25,7 @@ export function compareVersions(
   isTilde: boolean,
 ) {
   let outdated = false;
+  let aboveLatest = false;
 
   /*
     - Caret
@@ -35,7 +36,7 @@ export function compareVersions(
       outdated = true;
     }
   } else if (isTilde) {
-  /*
+    /*
     - Tilde
     - tilde allows patch updates within same minor: ~A.B.C accepts < A.(B+1).0 
     */
@@ -59,8 +60,23 @@ export function compareVersions(
     }
   }
 
+  // detect if specified version is greater than latest available
+  if (specifiedSem.major > latestSem.major) {
+    aboveLatest = true;
+  } else if (specifiedSem.major === latestSem.major) {
+    if (specifiedSem.minor > latestSem.minor) {
+      aboveLatest = true;
+    } else if (
+      specifiedSem.minor === latestSem.minor &&
+      specifiedSem.patch > latestSem.patch
+    ) {
+      aboveLatest = true;
+    }
+  }
+
   return {
     outdated,
+    aboveLatest,
   };
 }
 
