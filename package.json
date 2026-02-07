@@ -3,7 +3,7 @@
   "publisher": "shiv-shah1",
   "displayName": "pkg-json-dep-linter",
   "description": "Lints package json file dependencies for most current version.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": ">=1.60.0"
   },
