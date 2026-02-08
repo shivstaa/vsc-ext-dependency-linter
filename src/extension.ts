@@ -1,7 +1,14 @@
 import * as vscode from "vscode";
-import { fetchLatestVersion } from "./fetchVersion";
-import { compareVersions, readPackageJson, findVersionRange } from "./utils";
-import { parseSemver } from "./semver-util";
+import {
+  fetchLatestVersion,
+  fetchHighestNamedPrereleaseVersion,
+} from "./utils/fetchVersion";
+import {
+  compareVersions,
+  readPackageJson,
+  findVersionRange,
+} from "./utils/utils";
+import { parseSemver, compareSemver } from "./utils/semver-util";
 
 export function activate(context: vscode.ExtensionContext) {
   const diagnosticCollection = vscode.languages.createDiagnosticCollection(
@@ -49,7 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
               specified.startsWith("file:") ||
               specified.startsWith("git+") ||
               specified.startsWith("workspace:")
-			) {
+            ) {
               return;
             }
 
@@ -71,19 +78,72 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
               }
 
-              const { outdated, aboveLatest } = compareVersions(
-                specifiedSem,
-                latestSem,
-                isCaret,
-                isTilde,
-              );
+              /**
+               * If the package.json specified version includes a named prerelease (e.g. "beta"),
+               * check the highest matching named prerelease from npm and compare against that.
+               * which version we'll compare against in messages/logs (defaults to release latest)
+               */
+              let outdated = false;
+              let aboveLatest = false;
+              let comparedToVersion: string | null = latest;
+
+              const hasNamedPre =
+                specifiedSem &&
+                (specifiedSem as any).prerelease &&
+                (specifiedSem as any).prerelease.length > 0 &&
+                typeof (specifiedSem as any).prerelease[0] === "string";
+
+              if (hasNamedPre) {
+                const tagName = String((specifiedSem as any).prerelease[0]);
+                try {
+                  const best = await fetchHighestNamedPrereleaseVersion(
+                    name,
+                    tagName,
+                  );
+
+                  if (best) {
+                    comparedToVersion = best;
+                    const cmp = compareSemver(cleaned, best);
+
+                    if (cmp === -1) {
+                      outdated = true;
+                    } else if (cmp === 1) {
+                      aboveLatest = true;
+                    }
+                  } else {
+                    // fallback to release latest if no prerelease versions found for tag
+                    const cv = compareVersions(
+                      specifiedSem as any,
+                      latestSem,
+                      isCaret,
+                      isTilde,
+                    );
+                    outdated = cv.outdated;
+                    aboveLatest = cv.aboveLatest;
+                  }
+                } catch (err) {
+                  console.error(
+                    `pkg-json-dep-linter: error fetching named prerelease for ${name}:`,
+                    err,
+                  );
+                }
+              } else {
+                const cv = compareVersions(
+                  specifiedSem as any,
+                  latestSem,
+                  isCaret,
+                  isTilde,
+                );
+                outdated = cv.outdated;
+                aboveLatest = cv.aboveLatest;
+              }
 
               if (aboveLatest) {
                 try {
                   const range = findVersionRange(doc, name);
 
                   if (range) {
-                    const message = `Entry is out of range; expected ${latest} but got ${specified}`;
+                    const message = `Entry is out of range; expected ${comparedToVersion} but got ${specified}`;
                     const diag = new vscode.Diagnostic(
                       range,
                       message,
@@ -106,7 +166,7 @@ export function activate(context: vscode.ExtensionContext) {
                   const range = findVersionRange(doc, name);
 
                   if (range) {
-                    const message = `Dependency "${name}" is outdated: specified ${specified}; latest ${latest}`;
+                    const message = `Dependency "${name}" is outdated: specified ${specified}; latest ${comparedToVersion}`;
                     const diag = new vscode.Diagnostic(
                       range,
                       message,
@@ -123,7 +183,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
               } else {
                 console.log(
-                  `pkg-json-dep-linter: OK - ${name}: specified ${specified} latest ${latest}`,
+                  `pkg-json-dep-linter: OK - ${name}: specified ${specified} latest ${comparedToVersion}`,
                 );
               }
             } catch (err) {
